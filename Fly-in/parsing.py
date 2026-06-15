@@ -42,10 +42,12 @@ class Connection:
     def __init__(self,
                  zone1: str,
                  zone2: str,
-                 max_link_capacity: int = 1) -> None:
+                 max_link_capacity: int = 1,
+                 line_number: int = 0) -> None:
         self.zone1 = zone1
         self.zone2 = zone2
         self.max_link_capacity = max_link_capacity
+        self.line_number = line_number
 
 
 class DroneMap:
@@ -73,6 +75,7 @@ class DroneMap:
         try:
             with open(map_file) as file:
                 lines = file.readlines()
+                # print(lines)
                 if len(lines) == 0:
                     print("Error: map file is empty")
                     sys.exit(1)
@@ -84,7 +87,8 @@ class DroneMap:
             print(f"Error: could not read file '{map_file}': {e}")
             sys.exit(1)
 
-    def parse_metadata(self, metadata_str: str | None) -> Dict:
+    def parse_metadata(
+            self, metadata_str: str | None, line_number: int) -> Dict:
         """
         Parses metadata text into a dictionary.
 
@@ -104,10 +108,18 @@ class DroneMap:
         for item in items:
 
             if "=" not in item:
-                print(f"Error: invalid metadata '{item}'")
-                sys.exit(1)
+                raise ValueError(
+                    f"Error on line {line_number}: "
+                    f"invalid metadata '{item}'"
+                )
 
             key, value = item.split("=", 1)
+
+            if key in result:
+                raise ValueError(
+                    f"Error on line {line_number}: "
+                    f"duplicate metadata key '{key}'"
+                )
 
             if key == "zone":
                 if (
@@ -116,8 +128,10 @@ class DroneMap:
                                   "restricted",
                                   "priority"]
                         ):
-                    print(f"Error: invalid zone type '{value}'")
-                    sys.exit(1)
+                    raise ValueError(
+                        f"Error on line {line_number}: "
+                        f"invalid zone type '{value}'"
+                    )
                 result["zone"] = value
 
             elif key == "color":
@@ -125,23 +139,30 @@ class DroneMap:
 
             elif key == "max_drones":
                 if not value.isdigit() or int(value) < 1:
-                    print("Error: max_drones must be positive integer")
-                    sys.exit(1)
+                    raise ValueError(
+                        f"Error on line {line_number}: "
+                        "max_drones must be positive integer"
+                    )
                 result["max_drones"] = int(value)
 
             elif key == "max_link_capacity":
                 if not value.isdigit() or int(value) < 1:
-                    print("Error: max_link_capacity must be positive integer")
-                    sys.exit(1)
+                    raise ValueError(
+                        f"Error on line {line_number}: "
+                        "max_link_capacity must be positive integer"
+                    )
                 result["max_link_capacity"] = int(value)
 
             else:
-                print(f"Error: unknown metadata key '{key}'")
-                sys.exit(1)
+                raise ValueError(
+                    f"Error on line {line_number}: "
+                    f"unknown metadata key '{key}'"
+                )
 
         return result
 
-    def extract_metadata(self, line: str) -> Tuple[str, Optional[str]]:
+    def extract_metadata(
+            self, line: str, line_number: int) -> Tuple[str, Optional[str]]:
         """
         Extracts metadata from a line.
 
@@ -152,26 +173,30 @@ class DroneMap:
             tuple[str, str | None]:
                 Main text and metadata.
         """
-        if "[" not in line:
+        if not line.endswith("]"):
             return line.strip(), None
 
-        if line.count("[") != 1 or line.count("]") != 1:
-            print("Error: metadata must be [ ... ]")
-            sys.exit(1)
-
-        start = line.index("[")
-        end = line.index("]")
+        start = line.rfind("[")
+        end = line.rfind("]")
 
         if end < start:
-            print("Error: invalid metadata format")
-            sys.exit(1)
+            raise ValueError(
+                f"Error on line {line_number}: "
+                "invalid metadata format"
+            )
+
+        if not line.rstrip().endswith("]"):
+            raise ValueError(
+                f"Error on line {line_number}: "
+                "metadata must be at end  of line"
+            )
 
         metadata = line[start + 1: end]
         main_part = line[:start].strip()
 
         return main_part, metadata.strip()
 
-    def parse_zones(self, line: str) -> Tuple[Zone, str]:
+    def parse_zones(self, line: str, line_number: int) -> Tuple[Zone, str]:
         """
         Parses a zone line.
 
@@ -182,32 +207,46 @@ class DroneMap:
             tuple[Zone, str]:
                 Parsed zone object and zone type.
         """
-        main_part, metadata_str = self.extract_metadata(line)
+        main_part, metadata_str = self.extract_metadata(line, line_number)
 
-        if ":" not in line:
-            print("Error: invalid zone line (missing :)")
-            sys.exit(1)
+        if ":" not in main_part:
+            raise ValueError(
+                f"Error on line {line_number}: "
+                "invalid zone line (missing ':')"
+            )
 
         parts = main_part.split()
         if len(parts) != 4:
-            print(f"Error: invalid zone format -> {line}")
-            sys.exit(1)
+            raise ValueError(
+                f"Error on line {line_number}: "
+                f"invalid zone format -> {line}"
+            )
 
         zone_type = parts[0].replace(":", "")
         name = parts[1]
 
         if "-" in name:
-            print(f"Error: zone name '{name}' must not contain '-'")
-            sys.exit(1)
+            raise ValueError(
+                f"Error on line {line_number}: "
+                f"zone name '{name}' must not contain '-'"
+            )
 
         try:
             x = int(parts[2])
             y = int(parts[3])
         except ValueError:
-            print("Error: coordinates must be integers")
+            print(
+                f"Error on line {line_number}: "
+                "coordinates must be integers"
+                )
             sys.exit(1)
 
-        metadata = self.parse_metadata(metadata_str)
+        metadata = self.parse_metadata(metadata_str, line_number)
+
+        if zone_type in ["start_hub", "end_hub"]:
+            max_drones = metadata.get("max_drones", self.nb_drones)
+        else:
+            max_drones = metadata.get("max_drones", 1)
 
         return Zone(
             name=name,
@@ -215,10 +254,10 @@ class DroneMap:
             y=y,
             zone=metadata.get("zone", "normal"),
             color=metadata.get("color", None),
-            max_drones=metadata.get("max_drones", 1)
+            max_drones=max_drones
         ), zone_type
 
-    def parse_connection(self, line: str) -> Connection:
+    def parse_connection(self, line: str, line_number: int) -> Connection:
         """
         Parses a connection line.
 
@@ -228,17 +267,21 @@ class DroneMap:
         Returns:
             Connection: Parsed connection object.
         """
-        main_part, metadata_str = self.extract_metadata(line)
+        main_part, metadata_str = self.extract_metadata(line, line_number)
 
         if ":" not in main_part:
-            print("Error: invalid connection line")
-            sys.exit(1)
+            raise ValueError(
+                f"Error on line {line_number}: "
+                "invalid connection line"
+            )
 
         right = main_part.split(":", 1)[1].strip()
 
         if right.count("-") != 1:
-            print("Error: connection must be zone1-zone2")
-            sys.exit(1)
+            raise ValueError(
+                f"Error on line {line_number}: "
+                "connection must be zone1-zone2"
+            )
 
         zone1, zone2 = right.split("-")
 
@@ -246,17 +289,22 @@ class DroneMap:
         zone2 = zone2.strip()
 
         if not zone1 or not zone2:
-            print("Error: invalid connection names")
+            raise ValueError(
+                f"Error on line {line_number}: "
+                "invalid connection names"
+            )
             sys.exit(1)
 
         if "-" in zone1 or "-" in zone2:
-            print("Error: zone names must not contain '-'")
-            sys.exit(1)
+            raise ValueError(
+                f"Error on line {line_number}: "
+                "zone names must not contain '-'"
+            )
 
-        metadata = self.parse_metadata(metadata_str)
+        metadata = self.parse_metadata(metadata_str, line_number)
         max_link_capacity = metadata.get("max_link_capacity", 1)
 
-        return Connection(zone1, zone2, max_link_capacity)
+        return Connection(zone1, zone2, max_link_capacity, line_number)
 
     def parse(self, lines: List[str]) -> None:
         """
@@ -267,11 +315,11 @@ class DroneMap:
         """
         first_line = True
 
-        for line in lines:
+        for line_number, line in enumerate(lines, start=1):
 
-            line = line.strip()
+            line = line.split("#", 1)[0].strip()
 
-            if line == "" or line.startswith("#"):
+            if not line:
                 continue
 
             if first_line:
@@ -279,26 +327,34 @@ class DroneMap:
                 first_line = False
 
                 if not line.startswith("nb_drones"):
-                    print("Error: first line must be nb_drones")
-                    sys.exit(1)
+                    raise ValueError(
+                        f"Error on line {line_number}: "
+                        "first line must be nb_drones"
+                    )
 
             if line.startswith("nb_drones"):
 
                 if ":" not in line:
-                    print("Error: invalid line (not found :)")
-                    sys.exit(1)
+                    raise ValueError(
+                        f"Error on line {line_number}: "
+                        "invalid line (missing ':')"
+                    )
 
                 parts = line.split(":", 1)
 
                 try:
                     nb_drones = int(parts[1].strip())
                 except ValueError:
-                    print("Error: nb_drones should be a valid integer")
+                    print(
+                        f"Error on line {line_number}: "
+                        "nb_drones should be a valid integer"
+                    )
                     sys.exit(1)
 
                 if nb_drones < 1:
-                    print("Error: nb_drones must be positive")
-                    sys.exit(1)
+                    raise ValueError(
+                        f"Error on line {line_number}: "
+                        "nb_drones must be positive")
 
                 self.nb_drones = nb_drones
 
@@ -308,85 +364,148 @@ class DroneMap:
                 or line.startswith("hub")
             ):
 
-                zone, zone_type = self.parse_zones(line)
+                zone, zone_type = self.parse_zones(line, line_number)
 
                 if zone.name in self.zones:
-                    print(f"Error: duplicate zone name '{zone.name}'")
-                    sys.exit(1)
+                    raise ValueError(
+                        f"Error on line {line_number}: "
+                        f"duplicate zone name '{zone.name}'"
+                    )
 
                 if zone_type == "start_hub":
 
                     if self.start is not None:
-                        print("Error: duplicate start_hub")
-                        sys.exit(1)
+                        raise ValueError(
+                            f"Error on line {line_number}: "
+                            "duplicate start_hub"
+                        )
+
+                    if zone.zone == "blocked":
+                        raise ValueError(
+                            f"Error on line {line_number}: "
+                            "start_hub cannot be blocked"
+                        )
                     self.start = zone.name
 
-                elif zone_type == "end_hub":
+                if zone_type == "end_hub":
 
                     if self.end is not None:
-                        print("Error: duplicate end_hub")
-                        sys.exit(1)
+                        raise ValueError(
+                            f"Error on line {line_number}: "
+                            "duplicate end_hub")
+
+                    if zone.zone == "blocked":
+                        raise ValueError(
+                            f"Error on line {line_number}: "
+                            "end_hub cannot be blocked"
+                        )
                     self.end = zone.name
 
                 self.zones[zone.name] = zone
 
             elif line.startswith("connection"):
-                connection = self.parse_connection(line)
+                connection = self.parse_connection(line, line_number)
                 self.connections.append(connection)
 
             else:
-                print(f"Error: Unknown line type: {line}")
-                sys.exit(1)
+                raise ValueError(
+                    f"Error on line {line_number}: "
+                    f"Unknown line type: {line}"
+                )
 
         if self.nb_drones == 0:
-            print("Error: nb_drones is missing")
-            sys.exit(1)
+            raise ValueError("Error: nb_drones is missing")
 
     def validate(self) -> None:
         """
         Validates zones and connections.
         """
         if self.start is None:
-            print("Error: start not found")
-            sys.exit(1)
+            raise ValueError("Error: start not found")
 
         if self.end is None:
-            print("Error: end not found")
-            sys.exit(1)
+            raise ValueError("Error: end not found")
+
+        start_zone = self.zones[self.start]
+        end_zone = self.zones[self.end]
+
+        start_coords = (start_zone.x, start_zone.y)
+        end_coords = (end_zone.x, end_zone.y)
+
+        if start_coords == end_coords:
+            raise ValueError(
+                "Error: start_hub and end_hub "
+                "cannot share the same coordinates"
+            )
+
+        for zone in self.zones.values():
+            if zone.name in (self.start, self.end):
+                continue
+
+            if (zone.x, zone.y) == start_coords:
+                raise ValueError(
+                    f"Error: zone '{zone.name}' "
+                    "cannot share coordinates with start_hub"
+                )
+
+            if (zone.x, zone.y) == end_coords:
+                raise ValueError(
+                    f"Error: zone '{zone.name}' "
+                    "cannot share coordinates with end_hub"
+                )
+
+        if start_zone.max_drones < self.nb_drones:
+            raise ValueError(
+                "Error: start_hub max_drones must be "
+                "greater than or equal to nb_drones"
+            )
+
+        if end_zone.max_drones < self.nb_drones:
+            raise ValueError(
+                "Error: end_hub max_drones must be "
+                "greater than or equal to nb_drones"
+            )
 
         exist = []
 
         for connection in self.connections:
 
             if connection.zone1 not in self.zones:
-                print(f"Error: zone '{connection.zone1}'", end="")
-                print("in connection does not exist")
-                sys.exit(1)
+                raise ValueError(
+                    f"Error on line {connection.line_number}: "
+                    f"zone '{connection.zone1}' does not exist"
+                )
 
             if connection.zone2 not in self.zones:
-                print(f"Error: zone '{connection.zone2}'", end="")
-                print("in connection does not exist")
-                sys.exit(1)
+                raise ValueError(
+                    f"Error on line {connection.line_number}: "
+                    f"zone '{connection.zone2}' does not exist"
+                )
 
             if connection.zone1 == connection.zone2:
-                print("Error: connection cannot link a zone to itself")
-                print(f"'{connection.zone1}'")
-                sys.exit(1)
+                raise ValueError(
+                    f"Error on line {connection.line_number}: "
+                    "connection cannot link a zone to itself "
+                    f"'{connection.zone1}'"
+                )
 
             pair = tuple(sorted([connection.zone1, connection.zone2]))
 
             if pair in exist:
-                print("Error: there is duplicate in", end="")
-                print("'{connection.zone1}-{connection.zone2}'")
-                sys.exit(1)
+                raise ValueError(
+                    f"Error on line {connection.line_number}: "
+                    "duplicate connection "
+                    f"'{connection.zone1}-{connection.zone2}'"
+                )
 
             if (
                 self.zones[connection.zone1].zone == "blocked"
                 or self.zones[connection.zone2].zone == "blocked"
             ):
-                print("Error: connection uses blocked zone", end="")
-                print("'{connection.zone1}-{connection.zone2}'")
-                sys.exit(1)
+                raise ValueError(
+                    f"Error on line {connection.line_number}: "
+                    "connection uses blocked zone "
+                    f"'{connection.zone1}-{connection.zone2}'")
 
             exist.append(pair)
 

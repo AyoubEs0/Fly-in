@@ -1,13 +1,19 @@
+import sys
 from simulation import simulate
 from graph import Graph
 from parsing import DroneMap, parsing
 from pathfinding import find_two_shortest_paths
-from visualisation import Visualizer
+# from visualisation import Visualizer
 
 
 if __name__ == "__main__":
     drone_map = DroneMap()
-    parsing(drone_map)
+    try:
+        parsing(drone_map)
+    except ValueError as e:
+        print(e)
+        sys.exit(1)
+
     graph = Graph()
 
     for zone in drone_map.zones.values():
@@ -16,9 +22,9 @@ if __name__ == "__main__":
     for conn in drone_map.connections:
         graph.add_connection(conn)
 
-    visual = Visualizer(drone_map)
+    # visual = Visualizer(drone_map)
     history = simulate(drone_map, graph)
-    visual.visualisation(drone_map, history)
+    # visual.visualisation(drone_map, history)
 
     start = drone_map.start
     end = drone_map.end
