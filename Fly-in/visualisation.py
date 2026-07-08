@@ -1,10 +1,17 @@
 import pygame
-from typing import Dict, List, Tuple, Union
+from typing import Dict, List, Tuple
 from parsing import DroneMap
 
 
 class Visualizer():
+    """Visualizes the drone simulation using Pygame."""
     def __init__(self, drone_map: DroneMap) -> None:
+        """
+        Initializes the visualizer.
+
+        Args:
+        drone_map (DroneMap): Parsed map data.
+        """
         self.drone_map = drone_map
 
     def get_coordinates(
@@ -13,29 +20,34 @@ class Visualizer():
             zone_name: str,
             screen_width: int,
             screen_height: int) -> Tuple[float, float]:
+        """
+        Returns the screen coordinates of a zone.
+        """
         X = drone_map.zones[zone_name].x
         Y = drone_map.zones[zone_name].y
 
         scale = 100
 
-        # تحويل الإحداثيات
         x = X * scale
         y = Y * scale
 
-        # حساب متوسط الخريطة (center of all nodes)
         all_x = [z.x for z in drone_map.zones.values()]
         all_y = [z.y for z in drone_map.zones.values()]
 
         center_x = (min(all_x) + max(all_x)) / 2
         center_y = (min(all_y) + max(all_y)) / 2
 
-        # تحويل المركز إلى screen center
         offset_x = screen_width // 2 - center_x * scale
         offset_y = screen_height // 2 - center_y * scale
         return x + offset_x, y + offset_y
 
     def get_color(self, drone_map: DroneMap, zone_name: str) -> pygame.Color:
+        """
+        Returns the display color of a zone.
+        """
         zone_color = drone_map.zones[zone_name].color
+        if zone_color is None:
+            return pygame.Color("white")
         try:
             color = pygame.Color(zone_color)
         except ValueError:
@@ -44,7 +56,10 @@ class Visualizer():
 
     def visualisation(self,
                       drone_map: DroneMap,
-                      history: List[Dict[int, Union[str, None]]]) -> None:
+                      history: List[Dict[int, str]]) -> None:
+        """
+        Displays the drone simulation.
+        """
         pygame.init()
         info = pygame.display.Info()
 
@@ -55,20 +70,22 @@ class Visualizer():
 
         pygame.display.set_caption("Fly-in Visualization")
 
-        WHITE = (51, 255, 255)
         BLACK = (0, 0, 0)
 
         font = pygame.font.SysFont(None, 20)
 
-        drone_image = pygame.image.load("drone.webp").convert()
+        drone_image = pygame.image.load("drone.webp")
         drone_image.set_colorkey((255, 255, 255))
         drone_image = pygame.transform.scale(drone_image, (120, 120))
+
+        background = pygame.image.load("sky.webp")
+        background = pygame.transform.scale(
+            background, (SCREEN_WIDTH, SCREEN_HEIGHT))
 
         current_turn = -1
         running = True
         while running:
-            # تعبئة الخلفية بالأبيض
-            screen.fill(WHITE)
+            screen.blit(background, (0, 0))
 
             for conn in drone_map.connections:
                 zone1 = conn.zone1
@@ -89,9 +106,11 @@ class Visualizer():
                 screen.blit(text, text_rect)
 
             if current_turn >= 0 and current_turn < len(history):
-                zone_groups: Dict[Union[str, None], List[int]] = {}
+                zone_groups: Dict[str, List[int]] = {}
                 for drone_id, position in history[current_turn].items():
-                    zone_groups.setdefault(position, []).append(drone_id)
+                    if position not in zone_groups:
+                        zone_groups[position] = []
+                    zone_groups[position].append(drone_id)
 
                 for position, drones in zone_groups.items():
                     if "-" in str(position):
@@ -118,15 +137,22 @@ class Visualizer():
                     text_rect = text.get_rect(center=(base_x, base_y + 60))
                     screen.blit(text, text_rect)
 
-            # تحديث الشاشة
+            instructions = font.render(
+                "LEFT : Previous  RIGHT : Next   ESC : Exit",
+                True,
+                (255, 255, 255)
+            )
+            screen.blit(instructions, (20, 20))
             pygame.display.update()
 
-            # إغلاق النافذة
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
 
                 if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_ESCAPE:
+                        running = False
+
                     if event.key == pygame.K_RIGHT:
                         if current_turn < len(history) - 1:
                             current_turn += 1

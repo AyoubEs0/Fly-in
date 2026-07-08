@@ -14,7 +14,7 @@ class Drone:
         self.index = 0
         self.path = path
         self.in_transit: bool = False
-        self.transit_destination: str | None = None
+        self.transit_destination: str = ""
 
     def move(self) -> None:
         """

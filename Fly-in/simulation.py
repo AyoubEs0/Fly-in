@@ -1,117 +1,159 @@
+import sys
 from drone import Drone
-from pathfinding import find_two_shortest_paths
+from pathfinding import PathFinder
 from parsing import DroneMap
 from graph import Graph
-from typing import Dict, List, Union
+from typing import Dict, List, Tuple
 import heapq
 
 
-def simulate(
-        drone_map: DroneMap,
-        graph: Graph) -> List[Dict[int, Union[str, None]]]:
-    i = 1
-    drones = []
+class DroneSimulator:
+    """Simulates drones moving through the graph."""
+    def __init__(self, drone_map: DroneMap, graph: Graph):
+        """
+        Initializes the drone simulator.
 
-    start = drone_map.start
-    end = drone_map.end
+        Args:
+        drone_map (DroneMap): Parsed map data.
+        graph (Graph): Graph of zones and connections.
+        """
+        self.drone_map = drone_map
+        self.graph = graph
 
-    paths = find_two_shortest_paths(graph, start, end)
+    def initialize_conn_capacity(
+            self, paths: List[Tuple[float, List[str]]]) -> Dict[
+                Tuple[str, str], int]:
+        conn_capacity = {}
 
-    heapq.heapify(paths)
-    while i < drone_map.nb_drones + 1:
-        cost, path = heapq.heappop(paths)
-        drones.append(Drone(i, graph, start, end, path))
-        cost += cost // 2
-        heapq.heappush(paths, (cost, path))
-        i += 1
+        for _, path in paths:
+            for i in range(len(path) - 1):
+                key = (path[i], path[i + 1])
+                conn_capacity[key] = 0
 
-    drones_zones = {zone_name: 0 for zone_name in drone_map.zones.keys()}
-    drones_zones[start] = drone_map.nb_drones
+        return conn_capacity
 
-    drones_positions = {drone.id: start for drone in drones}
+    def simulate(self) -> List[Dict[int, str]]:
+        """
+        Simulates drone movement until all drones reach the destination.
 
-    history = []
+        Returns:
+        List[Dict[int, str]]: History of drone positions at each turn.
+        """
+        i = 1
+        drones = []
 
-    history.append(dict(drones_positions))
+        start = self.drone_map.start
+        end = self.drone_map.end
 
-    turns = 1
-    while drones_zones[end] != drone_map.nb_drones:
-        print(f"Turn {turns}: ", end="")
+        if start is None or end is None:
+            sys.exit(1)
 
-        conn_capacity = {
-            (zone1, link.neighbor): 0
-            for zone1, links in graph.connections.items()
-            for link in links
-            }
+        path_finder = PathFinder(self.graph)
 
-        for drone in drones:
-            if drone.in_transit:
-                if (
-                    drones_zones[
-                        drone.transit_destination
-                        ] < drone_map.zones[
-                            drone.transit_destination].max_drones):
-                    drone.in_transit = False
-                    drone.move()
-                    print(f"D{drone.id}-{drone.transit_destination}", end=" ")
-                    drones_zones[drone.zone] += 1
-                    drone.transit_destination = None
-                    drones_positions[drone.id] = drone.zone
-                    continue
+        paths = path_finder.find_two_shortest_paths(start, end)
 
-            if drone.zone == end:
-                continue
+        if not paths:
+            raise ValueError("No path found")
 
-            next_zone = drone.path[drone.index + 1]
+        heapq.heapify(paths)
+        while i < self.drone_map.nb_drones + 1:
+            cost, path = heapq.heappop(paths)
+            drones.append(Drone(i, self.graph, start, end, path))
+            cost += cost // 2
+            heapq.heappush(paths, (cost, path))
+            i += 1
 
-            max_capacity: int = 0
+        drones_zones = {zone_name: 0 for zone_name in self.drone_map.zones}
+        drones_zones[start] = self.drone_map.nb_drones
 
-            for link in graph.connections[drone.zone]:
-                if link.neighbor == next_zone:
-                    max_capacity = link.max_link_capacity
-                    break
+        drones_positions = {drone.id: start for drone in drones}
 
-            if next_zone == drone_map.end:
-                drones_zones[drone.zone] -= 1
-                drone.move()
-                print(f"D{drone.id}-{drone.zone}", end=" ")
-                drones_zones[drone.zone] += 1
-                drones_positions[drone.id] = drone.zone
-                continue
-
-            elif drone_map.zones[next_zone].zone == "restricted":
-                if (
-                    drones_zones[
-                        next_zone] < drone_map.zones[next_zone].max_drones
-                    and conn_capacity[(drone.zone, next_zone)] < max_capacity
-                ):
-                    current_zone = drone.zone
-                    drone.in_transit = True
-                    drone.transit_destination = next_zone
-                    drones_zones[drone.zone] -= 1
-                    print(f"D{drone.id}-({current_zone}-{next_zone})", end=" ")
-                    drones_positions[drone.id] = f"{current_zone}-{next_zone}"
-                else:
-                    continue
-
-            else:
-                if (
-                    drones_zones[
-                        next_zone] < drone_map.zones[next_zone].max_drones
-                    and conn_capacity[(drone.zone, next_zone)] < max_capacity
-                ):
-                    conn_capacity[(drone.zone, next_zone)] += 1
-                    drones_zones[drone.zone] -= 1
-                    drone.move()
-                    print(f"D{drone.id}-{drone.zone}", end=" ")
-                    drones_zones[drone.zone] += 1
-                    drones_positions[drone.id] = drone.zone
-                else:
-                    continue
-
+        history = []
         history.append(dict(drones_positions))
 
-        print()
-        turns += 1
+        turns = 1
 
-    return history
+        in_transit_counter = 0
+        while (
+            drones_zones[end] != self.drone_map.nb_drones
+            or in_transit_counter > 0
+        ):
+
+            print(f"Turn {turns}: ", end="")
+
+            turn_conn_usage = self.initialize_conn_capacity(paths)
+
+            for drone in drones:
+
+                if drone.in_transit:
+                    dest = drone.transit_destination
+                    drone.in_transit = False
+                    in_transit_counter -= 1
+                    drone.move()
+
+                    print(f"D{drone.id}-{dest}", end=" ")
+
+                    drone.transit_destination = ""
+                    drones_positions[drone.id] = drone.zone
+
+                    continue
+
+                if drone.zone == end:
+                    continue
+
+                next_zone = drone.path[drone.index + 1]
+
+                max_capacity = 1
+                for link in self.graph.connections[drone.zone]:
+                    if link.neighbor == next_zone:
+                        max_capacity = link.max_link_capacity
+                        break
+
+                key = (drone.zone, next_zone)
+
+                if self.drone_map.zones[next_zone].zone == "restricted":
+                    if (
+                        drones_zones[next_zone] < self.drone_map.zones[
+                            next_zone].max_drones
+                        and turn_conn_usage[key] < max_capacity
+                    ):
+                        turn_conn_usage[key] += 1
+
+                        old = drone.zone
+                        drone.in_transit = True
+                        in_transit_counter += 1
+                        drone.transit_destination = next_zone
+
+                        drones_zones[old] -= 1
+                        drones_zones[next_zone] += 1
+
+                        print(f"D{drone.id}-({old}-{next_zone})", end=" ")
+                        drones_positions[drone.id] = f"{old}-{next_zone}"
+
+                    continue
+
+                if (
+                    drones_zones[next_zone] < self.drone_map.zones[
+                        next_zone].max_drones
+                    and turn_conn_usage[key] < max_capacity
+                ):
+
+                    turn_conn_usage[key] += 1
+
+                    old = drone.zone
+                    drone.move()
+
+                    drones_zones[old] -= 1
+                    drones_zones[drone.zone] += 1
+
+                    print(f"D{drone.id}-{drone.zone}", end=" ")
+                    drones_positions[drone.id] = drone.zone
+
+                continue
+
+            history.append(dict(drones_positions))
+
+            print()
+            turns += 1
+
+        return history

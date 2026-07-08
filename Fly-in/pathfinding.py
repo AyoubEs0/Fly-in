@@ -3,84 +3,77 @@ from typing import Dict, List, Optional, Tuple
 from graph import Graph
 
 
-def find_shortest_path(graph: Graph, start: str, end: str
-                       ) -> Tuple[float, Optional[List[str]]]:
-    """
-    Finds the shortest path between two zones using Dijkstra's algorithm.
+class PathFinder:
+    """Finds shortest paths between nodes in a graph."""
+    def __init__(self, graph: Graph):
+        """Initialize the path finder with a graph."""
+        self.graph = graph
 
-    Args:
-        graph (Graph): The graph object.
-        start (str): Start zone name.
-        end (str): End zone name.
+    def find_shortest_path(self, start: str, end: str
+                           ) -> Tuple[float, Optional[List[str]]]:
+        """Return the shortest path and its cost using Dijkstra's algorithm."""
 
-    Returns:
-        Tuple[float, Optional[List[str]]]:
-            - Total cost of the path
-            - List of zone names in order, or None if no path exists
-    """
+        distances = {zone: float("inf") for zone in self.graph.zones}
+        distances[start] = 0
+        visited = set()
+        pq: List[Tuple[float, str]] = []
+        heapq.heappush(pq, (0, start))
 
-    distances = {zone: float("inf") for zone in graph.zones}
-    distances[start] = 0
-    visited = set()
-    pq: List[Tuple[float, str]] = []
-    heapq.heappush(pq, (0, start))
+        parent: Dict[str, Optional[str]] = {start: None}
+        while pq:
+            cost, zone_name = heapq.heappop(pq)
+            if zone_name in visited:
+                continue
+            if zone_name == end:
+                path = []
+                current: str | None = end
+                while current is not None:
+                    path.append(current)
+                    current = parent[current]
+                return cost, path[::-1]
 
-    parent: Dict[str, Optional[str]] = {start: None}
-    while pq:
-        cost, zone_name = heapq.heappop(pq)
-        if zone_name in visited:
-            continue
-        if zone_name == end:
-            path = []
-            current: str | None = end
-            while current is not None:
-                path.append(current)
-                current = parent[current]
-            return cost, path[::-1]
+            visited.add(zone_name)
 
-        visited.add(zone_name)
+            for link in self.graph.get_neighbors(zone_name):
+                new_cost = cost + link.cost
+                if new_cost < distances[link.neighbor]:
+                    distances[link.neighbor] = new_cost
+                    heapq.heappush(pq, (new_cost, link.neighbor))
+                    parent[link.neighbor] = zone_name
 
-        for zone in graph.get_neighbors(zone_name):
-            new_cost = cost + zone.cost
-            if new_cost < distances[zone.neighbor]:
-                distances[zone.neighbor] = new_cost
-                heapq.heappush(pq, (new_cost, zone.neighbor))
-                parent[zone.neighbor] = zone_name
+        return float("inf"), None
 
-    return float("inf"), None
+    def find_two_shortest_paths(self, start: str, end: str
+                                ) -> List[Tuple[float, List[str]]]:
+        """Return the shortest path and
+        the best alternative path, if available."""
 
+        first_cost, first_path = self.find_shortest_path(start, end)
+        if not first_path:
+            return []
 
-def find_two_shortest_paths(
-        graph: Graph, start: str, end: str
-        ) -> List[Tuple[float, List[str]]]:
+        best_second = None
 
-    first_cost, first_path = find_shortest_path(graph, start, end)
+        i = 0
+        for i in range(len(first_path) - 1):
 
-    if not first_path:
-        return []
+            zone1 = first_path[i]
+            zone2 = first_path[i + 1]
 
-    best_second = None
+            removed_links = self.graph.remove_connection(zone1, zone2)
 
-    i = 0
-    for i in range(len(first_path) - 1):
+            cost, path = self.find_shortest_path(start, end)
 
-        zone1 = first_path[i]
-        zone2 = first_path[i + 1]
+            self.graph.restore_connection(removed_links)
 
-        removed_links = graph.remove_connection(zone1, zone2)
+            if path and path != first_path:
 
-        cost, path = find_shortest_path(graph, start, end)
+                if best_second is None or cost < best_second[0]:
+                    best_second = (cost, path)
 
-        graph.restore_connection(removed_links)
+        results = [(first_cost, first_path)]
 
-        if path and path != first_path:
+        if best_second:
+            results.append(best_second)
 
-            if best_second is None or cost < best_second[0]:
-                best_second = (cost, path)
-
-    results = [(first_cost, first_path)]
-
-    if best_second:
-        results.append(best_second)
-
-    return results
+        return results

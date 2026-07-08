@@ -75,7 +75,6 @@ class DroneMap:
         try:
             with open(map_file) as file:
                 lines = file.readlines()
-                # print(lines)
                 if len(lines) == 0:
                     print("Error: map file is empty")
                     sys.exit(1)
@@ -88,7 +87,8 @@ class DroneMap:
             sys.exit(1)
 
     def parse_metadata(
-            self, metadata_str: str | None, line_number: int) -> Dict:
+            self, metadata_str: str | None, line_number: int
+            ) -> Dict[str, Any]:
         """
         Parses metadata text into a dictionary.
 
@@ -185,6 +185,9 @@ class DroneMap:
                 "invalid metadata format"
             )
 
+        if start == 0 or line[start - 1] != " ":
+            return line.strip(), None
+
         if not line.rstrip().endswith("]"):
             raise ValueError(
                 f"Error on line {line_number}: "
@@ -268,14 +271,15 @@ class DroneMap:
             Connection: Parsed connection object.
         """
         main_part, metadata_str = self.extract_metadata(line, line_number)
-
         if ":" not in main_part:
             raise ValueError(
                 f"Error on line {line_number}: "
                 "invalid connection line"
             )
 
-        right = main_part.split(":", 1)[1].strip()
+        left, right = main_part.split(":", 1)
+        right = right.strip()
+        left = left.strip()
 
         if right.count("-") != 1:
             raise ValueError(
@@ -322,47 +326,44 @@ class DroneMap:
             if not line:
                 continue
 
+            if ":" not in line:
+                raise ValueError(
+                    f"Error on line {line_number}: missing ':'"
+                    )
+
+            keyword = line.split(":", 1)[0].strip()
+
             if first_line:
 
                 first_line = False
 
-                if not line.startswith("nb_drones"):
+                if keyword != "nb_drones":
                     raise ValueError(
                         f"Error on line {line_number}: "
                         "first line must be nb_drones"
-                    )
+                        )
 
-            if line.startswith("nb_drones"):
-
-                if ":" not in line:
-                    raise ValueError(
-                        f"Error on line {line_number}: "
-                        "invalid line (missing ':')"
-                    )
+            if keyword == "nb_drones":
 
                 parts = line.split(":", 1)
 
                 try:
                     nb_drones = int(parts[1].strip())
                 except ValueError:
-                    print(
+                    raise ValueError(
                         f"Error on line {line_number}: "
                         "nb_drones should be a valid integer"
-                    )
-                    sys.exit(1)
+                        )
 
                 if nb_drones < 1:
                     raise ValueError(
                         f"Error on line {line_number}: "
-                        "nb_drones must be positive")
+                        "nb_drones must be positive"
+                        )
 
                 self.nb_drones = nb_drones
 
-            elif (
-                line.startswith("start_hub")
-                or line.startswith("end_hub")
-                or line.startswith("hub")
-            ):
+            elif keyword in ("start_hub", "end_hub", "hub"):
 
                 zone, zone_type = self.parse_zones(line, line_number)
 
@@ -403,14 +404,15 @@ class DroneMap:
 
                 self.zones[zone.name] = zone
 
-            elif line.startswith("connection"):
+            elif keyword == "connection":
+
                 connection = self.parse_connection(line, line_number)
                 self.connections.append(connection)
 
             else:
                 raise ValueError(
                     f"Error on line {line_number}: "
-                    f"Unknown line type: {line}"
+                    f"Unknown line type: {keyword}"
                 )
 
         if self.nb_drones == 0:
@@ -455,16 +457,10 @@ class DroneMap:
                 )
 
         if start_zone.max_drones < self.nb_drones:
-            raise ValueError(
-                "Error: start_hub max_drones must be "
-                "greater than or equal to nb_drones"
-            )
+            start_zone.max_drones = self.nb_drones
 
         if end_zone.max_drones < self.nb_drones:
-            raise ValueError(
-                "Error: end_hub max_drones must be "
-                "greater than or equal to nb_drones"
-            )
+            end_zone.max_drones = self.nb_drones
 
         exist = []
 
@@ -497,15 +493,6 @@ class DroneMap:
                     "duplicate connection "
                     f"'{connection.zone1}-{connection.zone2}'"
                 )
-
-            if (
-                self.zones[connection.zone1].zone == "blocked"
-                or self.zones[connection.zone2].zone == "blocked"
-            ):
-                raise ValueError(
-                    f"Error on line {connection.line_number}: "
-                    "connection uses blocked zone "
-                    f"'{connection.zone1}-{connection.zone2}'")
 
             exist.append(pair)
 

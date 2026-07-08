@@ -60,8 +60,8 @@ class Graph:
             return 2.0
         elif zone.zone == "blocked":
             return float("inf")
-
-        raise ValueError(f"Unknown zone type: {zone.zone}")
+        else:
+            return float("inf")
 
     def add_connection(self, conn: Connection) -> None:
         """
